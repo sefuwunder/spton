@@ -75,20 +75,53 @@
     refreshStrips() { for (let i = 0; i < this.strips.length; i++) this._applyStrip(i); }
 
     // ---- sample baking: the SP-1200 converter path, cached per pad ----
+    // Pads are either synth drums or slices of the track's imported sample;
+    // both run through the same 12-bit/varispeed/loop voice path.
     _buf(ti, pi) {
       const t = this.project.tracks[ti], pad = t.pads[pi];
-      const key = pad.drum + "|" + (t.spMode ? "sp" : "raw");
-      const hit = this.bufCache[ti][pi];
-      if (hit && hit.key === key) return hit.buf;
-      const data = t.spMode ? this.DSP.SYNTHS[pad.drum]() : this.DSP.SYNTHS_RAW[pad.drum]();
-      const sr = t.spMode ? this.DSP.SP_RATE : this.DSP.SYNTH_RATE;
-      const buf = this.ctx.createBuffer(1, data.length, sr);
+      let key, data, sr;
+      const sl = pad.src === "sample" && t.sample && t.sample.data ? pad.sample : null;
+      if (sl) {
+        key = "smp|" + t.sample.id + "|" + sl.start.toFixed(4) + "|" + sl.end.toFixed(4) +
+          "|" + (t.spMode ? "sp" : "raw");
+        const hit = this.bufCache[ti][pi];
+        if (hit && hit.key === key) return hit.buf;
+        const trimmed = this.DSP.trimSample(t.sample.data, sl.start, sl.end);
+        data = t.spMode ? this.DSP.sp1200ize(trimmed, t.sample.sr) : trimmed;
+        sr = t.spMode ? this.DSP.SP_RATE : t.sample.sr;
+      } else {
+        key = pad.drum + "|" + (t.spMode ? "sp" : "raw");
+        const hit = this.bufCache[ti][pi];
+        if (hit && hit.key === key) return hit.buf;
+        data = t.spMode ? this.DSP.SYNTHS[pad.drum]() : this.DSP.SYNTHS_RAW[pad.drum]();
+        sr = t.spMode ? this.DSP.SP_RATE : this.DSP.SYNTH_RATE;
+      }
+      const buf = this.ctx.createBuffer(1, Math.max(1, data.length), sr);
       buf.getChannelData(0).set(data);
       this.bufCache[ti][pi] = { key, buf };
       return buf;
     }
 
-    rebake(ti, pi) { this.bufCache[ti][pi] = null; if (this.ctx) this._buf(ti, pi); }
+    rebake(ti, pi) {
+      // safe before ensureAudio(): the cache is empty until the ctx exists
+      if (this.bufCache[ti]) this.bufCache[ti][pi] = null;
+      if (this.ctx) this._buf(ti, pi);
+    }
+
+    // Audition a raw slice (waveform clicks) straight to master, no SP path.
+    previewSlice(data, sr, start, end) {
+      this.ensureAudio();
+      const trimmed = this.DSP.trimSample(data, start, end);
+      if (!trimmed.length) return;
+      const buf = this.ctx.createBuffer(1, trimmed.length, sr);
+      buf.getChannelData(0).set(trimmed);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      const g = this.ctx.createGain();
+      g.gain.value = 0.9;
+      src.connect(g); g.connect(this.master);
+      src.start(this.ctx.currentTime);
+    }
 
     _kill(ti, pi, when) {
       for (const v of this.voices[ti][pi]) {

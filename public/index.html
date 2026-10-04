@@ -43,6 +43,10 @@
         <button id="btn-save" class="br-btn">Save</button>
         <button id="btn-reset" class="br-btn danger">Reset</button>
         <p class="br-hint">Autosaves to this browser.</p></div>
+      <div class="br-sec"><h4>Import</h4>
+        <button id="btn-import" class="br-btn">Import audio…</button>
+        <input type="file" id="file-import" accept="audio/*" hidden>
+        <p class="br-hint">Slice a loop across the selected track's pads.</p></div>
     </aside>
 
     <section id="session">
@@ -63,6 +67,7 @@
     <div id="detail-tabs">
       <button data-tab="clip" class="active">Clip</button>
       <button data-tab="rack">SP-1200 Rack</button>
+      <button data-tab="slice">Slice</button>
       <span id="detail-title"></span>
     </div>
     <div id="detail-body"></div>

@@ -18,12 +18,15 @@
   let selPad = 0;               // selected pad in the rack
   let detailTab = "clip";
   let stepCells = [];           // stepCells[step] = [td x8] for playhead
-  let saveTimer = null;
+  let saveTimer = null, saveWarned = false;
 
   function persist() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      try { localStorage.setItem(LS_KEY, M.serialize(project)); } catch (e) {}
+      try { localStorage.setItem(LS_KEY, M.serialize(project)); }
+      catch (e) {
+        if (!saveWarned) { saveWarned = true; toast("Project too large to autosave — sample audio stays in memory"); }
+      }
     }, 400);
   }
 
@@ -201,6 +204,7 @@
       b.classList.toggle("active", b.dataset.tab === detailTab));
     const body = $("#detail-body");
     if (detailTab === "clip") renderClipTab(body);
+    else if (detailTab === "slice") renderSliceTab(body);
     else renderRackTab(body);
   }
 
@@ -290,6 +294,9 @@
         `<option value="${d}"${d === pad.drum ? " selected" : ""}>${M.DRUM_LABELS[d]}</option>`).join("");
       card.innerHTML = `
         <div class="ph"><button class="phit">Pad ${pi + 1}</button></div>
+        ${pad.src === "sample" && pad.sample
+          ? `<div class="slice-tag">✂ ${Math.round(pad.sample.start * 100)}–${Math.round(pad.sample.end * 100)}% <button data-unsl title="Back to synth drum">synth</button></div>`
+          : ``}
         <select>${drumOpts}</select>
         <label>Tune <input type="range" min="0.25" max="2" step="0.01" value="${pad.tune}"><output>${pad.tune.toFixed(2)}×</output></label>
         <label>Level <input type="range" min="0" max="1" step="0.01" value="${pad.level}"><output>${Math.round(pad.level * 100)}</output></label>
@@ -303,7 +310,14 @@
         selPad = pi; engine.ensureAudio(); engine.triggerPad(ti, pi); renderDetail(); renderBrowser();
       };
       card.querySelector("select").onchange = (e) => {
-        pad.drum = e.target.value; engine.rebake(ti, pi); persist(); renderDetail();
+        pad.drum = e.target.value; pad.src = "synth"; pad.sample = null;
+        engine.rebake(ti, pi); persist(); renderDetail();
+      };
+      const unsl = card.querySelector("[data-unsl]");
+      if (unsl) unsl.onclick = (e) => {
+        e.stopPropagation();
+        pad.src = "synth"; pad.sample = null;
+        engine.rebake(ti, pi); persist(); renderDetail();
       };
       tune.oninput = () => { pad.tune = +tune.value; tune.nextElementSibling.textContent = pad.tune.toFixed(2) + "×"; persist(); };
       level.oninput = () => { pad.level = +level.value; level.nextElementSibling.textContent = Math.round(pad.level * 100); persist(); };
@@ -318,6 +332,129 @@
       wrap.appendChild(card);
     });
     body.appendChild(wrap);
+  }
+
+  // ---------------- slice ----------------
+  const sliceCfg = { mode: "auto", count: 8 };
+
+  function sliceBounds() {
+    const t = project.tracks[sel.t];
+    if (!t.sample || !t.sample.data) return [];
+    if (sliceCfg.mode === "auto") {
+      const onsets = DSP.detectOnsets(t.sample.data, t.sample.sr, { sensitivity: 1.2 });
+      const b = M.onsetSlices(onsets, t.sample.data.length);
+      if (b.length >= 2) return b.slice(0, 32);
+    }
+    return M.equalSlices(sliceCfg.count);
+  }
+
+  async function importFile(file) {
+    if (!file) return;
+    try {
+      engine.ensureAudio();
+      const decoded = await engine.ctx.decodeAudioData(await file.arrayBuffer());
+      if (decoded.duration > M.MAX_SAMPLE_SEC) { toast("Sample too long — 30s max"); return; }
+      loadSampleData(file.name.replace(/\.[^.]+$/, ""), Float32Array.from(decoded.getChannelData(0)), decoded.sampleRate);
+    } catch (e) { toast("Could not decode that audio file"); }
+  }
+
+  function loadSampleData(name, data, sr) {
+    const t = project.tracks[sel.t];
+    t.sample = { id: M.uid("smp"), name: String(name).slice(0, 40), data, sr };
+    persist();
+    detailTab = "slice";
+    renderDetail();
+    toast("Sample loaded — slice it, then chop to pads");
+  }
+
+  function chopToPads() {
+    const ti = sel.t, track = project.tracks[ti];
+    if (!track.sample) return;
+    const bounds = sliceBounds();
+    const n = Math.min(8, bounds.length);
+    for (let i = 0; i < n; i++) {
+      const pad = track.pads[i];
+      pad.src = "sample";
+      pad.sample = { start: bounds[i].start, end: bounds[i].end };
+      engine.rebake(ti, i);
+    }
+    persist();
+    detailTab = "rack";
+    renderDetail(); renderBrowser();
+    toast(bounds.length > 8 ? `Chopped 8 of ${bounds.length} slices` : `Chopped ${n} slices onto pads`);
+  }
+
+  function drawWave(cv, smp, bounds) {
+    const w = cv.clientWidth || 600, h = 120;
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d");
+    const d = smp.data, mid = h / 2;
+    ctx.fillStyle = "#161616"; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "#f5c518";
+    for (let x = 0; x < w; x++) {
+      const a = Math.floor((x / w) * d.length), b = Math.max(a + 1, Math.floor(((x + 1) / w) * d.length));
+      let mn = 1, mx = -1;
+      for (let i = a; i < b; i += 4) { const v = d[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+      const y1 = mid - mx * (mid - 4), y2 = mid - mn * (mid - 4);
+      ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    bounds.forEach((s) => ctx.fillRect(Math.floor(s.start * w), 0, 1, h));
+  }
+
+  function renderSliceTab(body) {
+    const track = project.tracks[sel.t], ti = sel.t;
+    $("#detail-title").textContent = track.name + " · Slice";
+    body.innerHTML = "";
+    if (!track.sample) {
+      body.innerHTML = `<div class="slice-empty">
+        <p>No sample on this track yet.</p>
+        <button id="slice-import" class="br-btn">Import audio…</button>
+        <p class="br-hint">WAV, MP3, AIFF, OGG — up to 30 seconds. It lands on ${escapeHtml(track.name)}.</p>
+      </div>`;
+      body.querySelector("#slice-import").onclick = () => $("#file-import").click();
+      return;
+    }
+    const smp = track.sample, bounds = sliceBounds();
+    const ctl = document.createElement("div");
+    ctl.className = "slice-ctl";
+    ctl.innerHTML = `
+      <span class="slice-name">${escapeHtml(smp.name)} · ${(smp.data.length / smp.sr).toFixed(1)}s</span>
+      <label>Mode <select id="slice-mode">
+        <option value="auto"${sliceCfg.mode === "auto" ? " selected" : ""}>Auto (onsets)</option>
+        <option value="equal"${sliceCfg.mode === "equal" ? " selected" : ""}>Equal</option>
+      </select></label>
+      <label id="slice-count-lab" style="${sliceCfg.mode === "equal" ? "" : "display:none"}">Slices
+        <select id="slice-count">${[4, 8, 16].map((n) => `<option${n === sliceCfg.count ? " selected" : ""}>${n}</option>`).join("")}</select>
+      </label>
+      <button id="slice-chop" class="br-btn accent">Chop to pads (${Math.min(8, bounds.length)})</button>
+      <button id="slice-replace" class="br-btn">Replace…</button>
+      <button id="slice-clear" class="br-btn danger">Remove</button>`;
+    body.appendChild(ctl);
+    const cv = document.createElement("canvas");
+    cv.id = "wave";
+    cv.title = "Click a slice to audition it";
+    body.appendChild(cv);
+    ctl.querySelector("#slice-mode").onchange = (e) => { sliceCfg.mode = e.target.value; renderDetail(); };
+    const cnt = ctl.querySelector("#slice-count");
+    if (cnt) cnt.onchange = (e) => { sliceCfg.count = +e.target.value; renderDetail(); };
+    ctl.querySelector("#slice-chop").onclick = chopToPads;
+    ctl.querySelector("#slice-replace").onclick = () => $("#file-import").click();
+    ctl.querySelector("#slice-clear").onclick = () => {
+      track.sample = null;
+      track.pads.forEach((p, pi) => {
+        if (p.src === "sample") { p.src = "synth"; p.sample = null; engine.rebake(ti, pi); }
+      });
+      persist(); renderDetail();
+    };
+    requestAnimationFrame(() => drawWave(cv, smp, sliceBounds()));
+    cv.onclick = (e) => {
+      const r = cv.getBoundingClientRect();
+      const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      const bb = sliceBounds();
+      const b = bb.find((s) => frac >= s.start && frac < s.end) || bb[bb.length - 1];
+      if (b) engine.previewSlice(smp.data, smp.sr, b.start, b.end);
+    };
   }
 
   function renderAll() {
@@ -370,8 +507,12 @@
     b.onclick = () => { detailTab = b.dataset.tab; renderDetail(); };
   });
   document.addEventListener("pointerdown", () => engine.ensureAudio(), { once: true });
+  $("#btn-import").onclick = () => $("#file-import").click();
+  $("#file-import").onchange = (e) => { importFile(e.target.files[0]); e.target.value = ""; };
   engine.onchange = () => { renderSession(); if (detailTab === "clip") renderDetail(); };
   bindTransport();
   renderAll();
   playheadLoop();
+  // test / automation hook (no UI effect)
+  window.__spton = { engine, project: () => project, importSample: loadSampleData, chop: chopToPads, slices: sliceBounds };
 })();
