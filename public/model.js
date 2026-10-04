@@ -199,6 +199,100 @@
     return p;
   }
 
+  // ---- SP-1200 project import ----
+  // Reads an SP-1200 exported project (version 1: bpm/swing, 8 pads with
+  // optional custom samples, 4 tapes with optional stereo audio) and builds
+  // a SPTON session around it:
+  //   - transport bpm/swing follow the SP-1200
+  //   - track 1 becomes the SP-1200 kit: pads matched by drum id (the two
+  //     apps order clap/rim vs hats differently), tune/level/loop carried
+  //     over; custom samples are concatenated into the track's shared
+  //     sample with one slice per pad, so they play through the same
+  //     12-bit/varispeed/loop voice path as the slicer chops
+  //   - tracks 2-5 take the non-empty tapes as mono track samples, pad 1
+  //     of each playing the whole tape so it stays playable from a clip
+  // Throws on anything that is not an SP-1200 project.
+  const SP1200_PAD_ORDER = ["kick", "snare", "clap", "rim", "chat", "ohat", "tom", "shaker"];
+  const SP1200_SR = 44100; // SP-1200 pad samples and tape audio are 44.1 kHz
+  function importSp1200(json) {
+    let sp;
+    try { sp = typeof json === "string" ? JSON.parse(json) : json; }
+    catch (e) { throw new Error("not an SP-1200 project"); }
+    if (!sp || sp.version !== 1 || !Array.isArray(sp.pads) || sp.pads.length !== N_PADS)
+      throw new Error("not an SP-1200 project");
+    const p = createProject();
+    if (+sp.bpm > 0) p.bpm = Math.min(300, Math.max(40, +sp.bpm));
+    if (+sp.swing >= 50) p.swing = Math.min(75, Math.max(50, +sp.swing));
+    // --- track 1: the kit ---
+    const kit = p.tracks[0];
+    kit.name = String(sp.name || "SP-1200").slice(0, 24) || "SP-1200";
+    kit.spMode = sp.spMode !== false;
+    const customs = [];
+    sp.pads.forEach((ps, i) => {
+      if (!ps) return;
+      const j = DRUMS.indexOf(SP1200_PAD_ORDER[i]);
+      if (j < 0) return;
+      const pad = kit.pads[j];
+      if (+ps.tune > 0) pad.tune = +ps.tune;
+      if (ps.level != null) pad.level = Math.min(1, Math.max(0, +ps.level / 100));
+      if (ps.loop) {
+        pad.loopOn = !!ps.loop.on;
+        pad.loopStart = Math.min(1, Math.max(0, +ps.loop.start || 0));
+        pad.loopEnd = Math.min(1, Math.max(0, ps.loop.end == null ? 1 : +ps.loop.end));
+      }
+      if (ps.custom && typeof ps.custom.pcm === "string" && ps.custom.pcm.length) {
+        try {
+          const data = b64ToF32(ps.custom.pcm); // same LE-int16 wire format
+          if (data.length > 0) customs.push({ pad: j, data });
+        } catch (e) { /* corrupt sample: pad keeps its synth drum */ }
+      }
+    });
+    if (customs.length) {
+      let total = 0;
+      customs.forEach((c) => { total += c.data.length; });
+      const cat = new Float32Array(total);
+      let off = 0;
+      customs.forEach((c) => {
+        c.start = off / total;
+        cat.set(c.data, off);
+        off += c.data.length;
+        c.end = off / total;
+      });
+      kit.sample = { id: uid("smp"), name: kit.name + " samples", data: cat, sr: SP1200_SR };
+      customs.forEach((c) => {
+        const pad = kit.pads[c.pad];
+        pad.src = "sample";
+        pad.sample = { start: c.start, end: c.end };
+      });
+    }
+    // --- tracks 2-5: the tapes ---
+    const tapes = Array.isArray(sp.tapes) ? sp.tapes : [];
+    let ti = 0;
+    for (const t of tapes) {
+      if (ti >= N_TRACKS - 1) break;
+      if (!t || !t.audio || typeof t.audio.pcm !== "string") continue;
+      const len = +t.audio.len;
+      if (!(len > 0)) continue;
+      let planar;
+      try { planar = b64ToF32(t.audio.pcm); } catch (e) { continue; }
+      if (planar.length < len * 2) continue;
+      const mono = new Float32Array(len);
+      for (let i = 0; i < len; i++) mono[i] = (planar[i] + planar[len + i]) / 2;
+      const trk = p.tracks[1 + ti];
+      trk.name = String(t.name || "TAPE " + (ti + 1)).slice(0, 24) || "TAPE";
+      trk.sample = { id: uid("smp"), name: trk.name, data: mono, sr: +t.audio.sr > 0 ? +t.audio.sr : SP1200_SR };
+      if (t.level != null) trk.vol = Math.min(1, Math.max(0, +t.level / 100));
+      trk.mute = !!t.muted;
+      trk.spMode = sp.spMode !== false;
+      const pad = trk.pads[0];
+      pad.src = "sample";
+      pad.sample = { start: 0, end: 1 };
+      for (let s = 0; s < N_SCENES; s++) p.clips[1 + ti][s] = null;
+      ti++;
+    }
+    return p;
+  }
+
   // ---- slicing ----
   // Equal slices: n even regions as {start,end} fractions.
   function equalSlices(n) {
@@ -231,6 +325,7 @@
     uid, makeTrack, makeScene, makeClip, emptySteps,
     setStep, clearClip, cloneClip, clipHitCount, grooveClip,
     createProject, serialize, deserialize, f32ToB64, b64ToF32,
+    importSp1200,
     equalSlices, onsetSlices,
     barDuration, msToNextBar,
   };

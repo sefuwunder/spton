@@ -121,6 +121,34 @@
         location.reload();
       } catch (err) { toast("Could not open that file"); }
     };
+    $("#btn-import-sp").onclick = () => $("#file-import-sp").click();
+    $("#file-import-sp").onchange = async (e) => {
+      const f = e.target.files[0]; e.target.value = "";
+      if (!f) return;
+      try {
+        const imported = M.importSp1200(await f.text());
+        let out = M.serialize(imported);
+        M.deserialize(out); // validates before we touch stored state
+        try {
+          localStorage.setItem(LS_KEY, out);
+        } catch (quota) {
+          // long tapes dominate the size: retry with tape audio stripped,
+          // the way SP-1200's own STORE falls back to "(NO TAPE)"
+          imported.tracks.forEach((t, i) => {
+            if (i === 0 || !t.sample) return;
+            t.sample = null;
+            t.pads.forEach((pad) => { pad.src = "synth"; pad.sample = null; });
+          });
+          out = M.serialize(imported);
+          localStorage.setItem(LS_KEY, out);
+          toast("SP-1200 project imported without tape audio (too large)");
+          location.reload();
+          return;
+        }
+        toast("SP-1200 project imported");
+        location.reload();
+      } catch (err) { toast("Could not import that SP-1200 file"); }
+    };
     $("#btn-reset").onclick = () => {
       if (!confirm("Reset to the factory project?")) return;
       project = M.createProject();
