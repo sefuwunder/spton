@@ -98,6 +98,29 @@
       try { localStorage.setItem(LS_KEY, M.serialize(project)); toast("Project saved"); }
       catch (e) { toast("Save failed"); }
     };
+    $("#btn-export").onclick = () => {
+      try {
+        const blob = new Blob([M.serialize(project)], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        const d = new Date(), p = (n) => String(n).padStart(2, "0");
+        a.download = `spton-project-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.json`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 800);
+        toast("Project downloaded");
+      } catch (e) { toast("Export failed"); }
+    };
+    $("#btn-open").onclick = () => $("#file-open").click();
+    $("#file-open").onchange = async (e) => {
+      const f = e.target.files[0]; e.target.value = "";
+      if (!f) return;
+      try {
+        const text = await f.text();
+        M.deserialize(text); // validates before we touch stored state
+        localStorage.setItem(LS_KEY, text);
+        location.reload();
+      } catch (err) { toast("Could not open that file"); }
+    };
     $("#btn-reset").onclick = () => {
       if (!confirm("Reset to the factory project?")) return;
       project = M.createProject();

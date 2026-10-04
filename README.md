@@ -39,7 +39,9 @@ bun src/server.ts
 ```
 
 Zero dependencies. Project autosaves to the browser (localStorage);
-Save/Reset live in the browser panel.
+Save/Reset live in the browser panel, plus **Save to file** (downloads a
+`.json` snapshot) and **Open file…** (loads one back, replacing the
+current project).
 
 ## Tests
 
