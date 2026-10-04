@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPTON — SP-1200 engine, session view</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23141414'/%3E%3Crect x='6' y='6' width='8' height='8' fill='%23f5c518'/%3E%3Crect x='18' y='6' width='8' height='8' fill='%233ec1ff'/%3E%3Crect x='6' y='18' width='8' height='8' fill='%23ff5c39'/%3E%3Crect x='18' y='18' width='8' height='8' fill='%237ee081'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <header id="transport">
+    <div class="tp-group">
+      <button id="btn-play" class="tp-btn" title="Play / Stop (Space)">&#9654;</button>
+      <button id="btn-stop" class="tp-btn" title="Stop">&#9632;</button>
+      <button id="btn-rec" class="tp-btn" title="Session record: pad hits punch into the selected clip">&#9679;</button>
+    </div>
+    <div class="tp-group">
+      <label class="tp-field">Tempo <span id="tempo-val">128.0</span>
+        <input id="tempo" type="range" min="60" max="200" step="0.5" value="128">
+      </label>
+      <label class="tp-field">Swing <span id="swing-val">54%</span>
+        <input id="swing" type="range" min="50" max="75" step="1" value="54">
+      </label>
+      <button id="btn-metro" class="tp-btn toggle" title="Metronome">Click</button>
+    </div>
+    <div class="tp-group tp-right">
+      <span id="pos">1.1.1</span>
+      <label class="tp-field">Master
+        <input id="master-vol" type="range" min="0" max="1" step="0.01" value="0.9">
+      </label>
+    </div>
+  </header>
+
+  <div id="main">
+    <aside id="browser">
+      <h3>Browser</h3>
+      <div class="br-sec"><h4>Sounds</h4><div id="br-drums"></div>
+        <p class="br-hint">Click a sound to load it onto the selected pad.</p></div>
+      <div class="br-sec"><h4>Grooves</h4><div id="br-grooves"></div>
+        <p class="br-hint">Click a groove to drop it into the selected slot.</p></div>
+      <div class="br-sec"><h4>Project</h4>
+        <button id="btn-save" class="br-btn">Save</button>
+        <button id="btn-reset" class="br-btn danger">Reset</button>
+        <p class="br-hint">Autosaves to this browser.</p></div>
+    </aside>
+
+    <section id="session">
+      <div id="grid-wrap">
+        <div id="col-heads"></div>
+        <div id="grid"></div>
+        <div id="col-foots"></div>
+      </div>
+    </section>
+
+    <aside id="scene-col">
+      <h3>Scenes</h3>
+      <div id="scene-launch"></div>
+    </aside>
+  </div>
+
+  <section id="detail">
+    <div id="detail-tabs">
+      <button data-tab="clip" class="active">Clip</button>
+      <button data-tab="rack">SP-1200 Rack</button>
+      <span id="detail-title"></span>
+    </div>
+    <div id="detail-body"></div>
+  </section>
+</div>
+<div id="toast"></div>
+<script src="/dsp.js"></script>
+<script src="/model.js"></script>
+<script src="/engine.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
